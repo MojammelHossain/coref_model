@@ -78,6 +78,6 @@ def get_train_dataloader(config):
         examples.append(json.loads(line))
 
     tokenizer = BertTokenizer.from_pretrained(config["model_name"], do_lower_case=True)
-    dataset = MyDataset(examples, config["max_segment_len"], config["max_training_sentences"], config["genres"], tokenizer, True)
+    dataset = dataloader.MyDataset(examples, config["max_segment_len"], config["max_training_sentences"], config["genres"], tokenizer, True)
     train_dataloader = DataLoader(dataset, batch_size=1, drop_last=False, shuffle=False, collate_fn=collate_fn)
     return train_dataloader
