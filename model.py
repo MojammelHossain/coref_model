@@ -1,5 +1,6 @@
 import math
 import util
+import torch
 import torch.nn as nn
 from collections import OrderedDict
 from transformers import BertModel
