@@ -1,29 +1,10 @@
 import sys
 import util
-import torch
 import random
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
-
-
-# convert into torch tensor
-def collate_fn(example):
-    example = example[0]
-    return {"doc_key": example[0],
-            "input_ids": torch.tensor(example[1]).long(),
-            "input_mask": torch.tensor(example[2]).long(),
-            "clusters": example[3],
-            "text_len": example[4],
-            "speaker_ids": torch.tensor(example[5]).long(),
-            "genre": example[6],
-            "gold_starts": torch.tensor(example[7]).long(),
-            "gold_ends": torch.tensor(example[8]).long(),
-            "cluster_ids": torch.tensor(example[9], dtype=torch.int32),
-            "sentence_map": example[10]
-            }
+from torch.utils.data import Dataset
 
 class MyDataset(Dataset):
-
     def __init__(self, data, max_segment_length, max_training_segments, genre, tokenizer, is_training):
         self.examples = data
         self.max_segment_length = max_segment_length
