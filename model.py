@@ -29,7 +29,7 @@ class BertForCoref(nn.Module):
       self.antecedent_distance_embedding = nn.Parameter(util.truncated_normal_(torch.zeros([10, config['feature_size']]), std=0.02), requires_grad=True)
       self.distance_scores_linear = nn.Linear(config['feature_size'], 1, bias=True)
     
-    self.genre_embedding = nn.Parameter(util.truncated_normal_(torch.zeros([len(config['genre']), config['feature_size']]), std=0.02), requires_grad=True)
+    self.genre_embedding = nn.Parameter(util.truncated_normal_(torch.zeros([len(config['genres']), config['feature_size']]), std=0.02), requires_grad=True)
     self.src_projection = nn.Linear(self.in_features, self.in_features, bias=True)
     if config['use_metadata']:
       self.coref_layer_speaker_embedding = nn.Parameter(util.truncated_normal_(torch.zeros([2, config['feature_size']]),std=0.02), requires_grad=True)
