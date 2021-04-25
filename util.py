@@ -71,9 +71,9 @@ def collate_fn(example):
             "sentence_map": example[10]
             }
 
-def get_train_dataloader(config, data_path):
+def get_train_dataloader(config):
     examples = []
-    with open(data_path,"r") as file:
+    with open(config["train_path"],"r") as file:
       for line in file.readlines():
         examples.append(json.loads(line))
 
