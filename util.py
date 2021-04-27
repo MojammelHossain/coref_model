@@ -23,19 +23,21 @@ def truncated_normal_(tensor, mean=0, std=1):
     return tensor
 
 def get_top_span_indices(candidate_mention_scores, candidate_starts, candidate_ends, num_words, k):
-    tf_candidate_mention_scores = tf.convert_to_tensor(candidate_mention_scores.clone().detach().numpy())
-    tf_candidate_starts = tf.convert_to_tensor(candidate_starts.clone().detach().numpy(), dtype='int32')
-    tf_candidate_ends = tf.convert_to_tensor(candidate_ends.clone().detach().numpy(), dtype='int32')
+    tf_candidate_mention_scores = tf.convert_to_tensor(candidate_mention_scores.clone().cpu().detach().numpy())
+    tf_candidate_starts = tf.convert_to_tensor(candidate_starts.clone().cpu().detach().numpy(), dtype='int32')
+    tf_candidate_ends = tf.convert_to_tensor(candidate_ends.clone().cpu().detach().numpy(), dtype='int32')
+    tf_num_words = tf.convert_to_tensor(num_words.clone().cpu().detach().numpy(), dtype='int32')
+    tf_k = tf.convert_to_tensor(k.clone().cpu().detach().numpy(), dtype='int32')
     return coref_ops.extract_spans(tf.expand_dims(tf_candidate_mention_scores, 0), 
-  								 tf.expand_dims(tf_candidate_starts, 0),
-  								 tf.expand_dims(tf_candidate_ends, 0),
-  								 tf.expand_dims(k, 0),
-  								 num_words,
-  								 True) # [1, k]
+                   tf.expand_dims(tf_candidate_starts, 0),
+                   tf.expand_dims(tf_candidate_ends, 0),
+                   tf.expand_dims(tf_k, 0),
+                   tf_num_words,
+                   True) # [1, k]
 
 def initialize_from_env(eval_test=False):
 
-    name = sys.argv[1]
+    name = "train_bert_base"
     print("Running experiment: {}".format(name))
 
     if eval_test:
@@ -67,7 +69,7 @@ def collate_fn(example):
             "genre": example[6],
             "gold_starts": torch.tensor(example[7]).long(),
             "gold_ends": torch.tensor(example[8]).long(),
-            "cluster_ids": torch.tensor(example[9], dtype=torch.int32),
+            "cluster_ids": torch.tensor(example[9]),
             "sentence_map": torch.tensor(example[10])
             }
 

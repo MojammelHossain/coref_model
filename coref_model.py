@@ -8,9 +8,10 @@ from transformers import BertModel
 
 
 class BertForCoref(nn.Module):
-  def __init__(self, config):
+  def __init__(self, config, device):
     super(BertForCoref, self).__init__()
     self.config = config
+    self.device = device
     self.bert = BertModel.from_pretrained(config['model_name'])
     self.mention_word_attn = nn.Linear(768, 1, bias=True)
     self.in_features = 1536
@@ -78,14 +79,14 @@ class BertForCoref(nn.Module):
     same_start = torch.eq(labeled_starts.unsqueeze(1), candidate_starts.unsqueeze(0)) # [num_labeled, num_candidates]
     same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0)) # [num_labeled, num_candidates]
     same_span = torch.logical_and(same_start, same_end) # [num_labeled, num_candidates]
-    candidate_labels = torch.matmul(labels.unsqueeze(0), same_span.int()) # [1, num_candidates]
+    candidate_labels = torch.matmul(labels.float().unsqueeze(0), same_span.float()) # [1, num_candidates]
     candidate_labels = candidate_labels.squeeze(0) # [num_candidates]
     return candidate_labels
   
   def get_masked_mention_word_scores(self, encoded_doc, span_starts, span_ends):
     num_words = encoded_doc.shape[0] # T
     num_c = span_starts.shape[0] # NC torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30])
-    doc_range = torch.tile(torch.arange(num_words).unsqueeze(0), [num_c, 1]) # [K, T]
+    doc_range = torch.tile(torch.arange(num_words).unsqueeze(0), [num_c, 1]).to(self.device) # [K, T]
     mention_mask = torch.logical_and(doc_range >= span_starts.unsqueeze(1), doc_range <= span_ends.unsqueeze(1)) #[K, T]
     word_attn = self.mention_word_attn(encoded_doc).squeeze(1)
     mention_word_attn = nn.Softmax(dim=1)(torch.log(mention_mask.long()) + word_attn.unsqueeze(0))
@@ -148,7 +149,7 @@ class BertForCoref(nn.Module):
     else:
       emb_size = 1
     flattened_emb = torch.reshape(emb, [batch_size * seqlen, emb_size])  # [batch_size * seqlen, emb]
-    offset = (torch.arange(batch_size)*seqlen).unsqueeze(1)  # [batch_size, 1]
+    offset = (torch.arange(batch_size)*seqlen).unsqueeze(1).to(self.device)  # [batch_size, 1]
     gathered = flattened_emb[indices + offset] # [batch_size, num_indices, emb]
     if len(emb.shape) == 2:
       gathered = gathered.squeeze() # [batch_size, num_indices]
@@ -156,7 +157,7 @@ class BertForCoref(nn.Module):
 
   def coarse_to_fine_pruning(self, top_span_emb, top_span_mention_scores, c, dropout):
     k = top_span_emb.shape[0]
-    top_span_range = torch.arange(top_span_emb.shape[0]) # [k]
+    top_span_range = torch.arange(top_span_emb.shape[0]).to(self.device) # [k]
     antecedent_offsets = top_span_range.unsqueeze(1) - top_span_range.unsqueeze(0) # [k, k]
     antecedents_mask = antecedent_offsets >= 1 # [k, k]
     fast_antecedent_scores = top_span_mention_scores.unsqueeze(1) + top_span_mention_scores.unsqueeze(0) # [k, k]
@@ -168,7 +169,7 @@ class BertForCoref(nn.Module):
       antecedent_distance_scores = distance_scores.squeeze(1)[antecedent_distance_buckets] # [k, c]
       fast_antecedent_scores += antecedent_distance_scores
 
-    _, top_antecedents = fast_antecedent_scores.topk(c, sorted=False) # [k, c]
+    _, top_antecedents = fast_antecedent_scores.topk(int(c.item()), sorted=False) # [k, c]
     top_antecedents_mask = self.batch_gather(antecedents_mask, top_antecedents) # [k, c]
     top_fast_antecedent_scores = self.batch_gather(fast_antecedent_scores, top_antecedents) # [k, c]
     top_antecedent_offsets = self.batch_gather(antecedent_offsets, top_antecedents) # [k, c]
@@ -185,7 +186,7 @@ class BertForCoref(nn.Module):
       speaker_pair_emb = self.coref_layer_speaker_embedding[same_speaker.long()] # [k, c, emb]
       feature_emb_list.append(speaker_pair_emb)
 
-      tiled_genre_emb = torch.tile(genre_emb.unsqueeze(0).unsqueeze(0), [k, c, 1]) # [k, c, emb]
+      tiled_genre_emb = torch.tile(genre_emb.unsqueeze(0).unsqueeze(0), [k, c, 1]).to(self.device) # [k, c, emb]
       feature_emb_list.append(tiled_genre_emb)
 
     if self.config['use_features']: #use feature
@@ -202,7 +203,7 @@ class BertForCoref(nn.Module):
 
     target_emb = top_span_emb.unsqueeze(1) # [k, 1, emb]
     similarity_emb = top_antecedent_emb * target_emb # [k, c, emb]
-    target_emb = torch.tile(target_emb, [1, c, 1]) # [k, c, emb]
+    target_emb = torch.tile(target_emb, [1, c, 1]).to(self.device) # [k, c, emb]
 
     pair_emb = torch.cat([target_emb, top_antecedent_emb, similarity_emb, feature_emb], 2) # [k, c, emb]
 
@@ -223,13 +224,13 @@ class BertForCoref(nn.Module):
     num_sentences = out['last_hidden_state'].shape[0]
     max_sentence_length = out['last_hidden_state'].shape[1]
     mention_doc = self.flatten_emb_by_sentence(out['last_hidden_state'], input_mask.bool())
-    num_words = mention_doc.shape[0]
+    num_words = torch.tensor(mention_doc.shape[0]).to('cuda')
     flattened_sentence_indices = sentence_map
 
-    candidate_starts = torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30])
-    candidate_ends = candidate_starts + torch.arange(30).unsqueeze(0)
+    candidate_starts = torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30]).to(self.device)
+    candidate_ends = (candidate_starts + torch.arange(30, device="cuda").unsqueeze(0)).to(self.device)
     candidate_start_sentence_indices = flattened_sentence_indices[candidate_starts]
-    candidate_end_sentence_indices = flattened_sentence_indices[torch.minimum(candidate_ends, torch.tensor(num_words - 1))]
+    candidate_end_sentence_indices = flattened_sentence_indices[torch.minimum(candidate_ends, num_words - 1)]
     candidate_mask = torch.logical_and(candidate_ends < num_words, torch.eq(candidate_start_sentence_indices, candidate_end_sentence_indices))
     flattened_candidate_mask = candidate_mask.view(-1,)
     candidate_starts = torch.masked_select(candidate_starts.view(-1), flattened_candidate_mask) # [num_candidates]
@@ -243,8 +244,8 @@ class BertForCoref(nn.Module):
     candidate_mention_scores = candidate_mention_scores.squeeze(1) # [k]
 
     # beam size
-    k = int(np.minimum(3900, np.floor(num_words * self.config["top_span_ratio"])))
-    c = int(np.minimum(self.config["max_top_antecedents"], k))
+    k = torch.min(torch.tensor(3900), torch.floor(num_words * self.config["top_span_ratio"]))
+    c = torch.min(torch.tensor(self.config["max_top_antecedents"]), k)
     top_span_indices = util.get_top_span_indices(candidate_mention_scores, candidate_starts, candidate_ends, num_words, k)
     indices = torch.tensor(top_span_indices.numpy()).long().squeeze()
     top_span_starts = candidate_starts[indices] # [k]
@@ -261,13 +262,13 @@ class BertForCoref(nn.Module):
     
     top_antecedents, top_antecedents_mask, top_fast_antecedent_scores, top_antecedent_offsets = self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, c, dropout)
     num_segs, seg_len = input_ids.shape[0], input_ids.shape[1]
-    word_segments = torch.tile(torch.arange(num_segs).unsqueeze(1), [1, seg_len])
+    word_segments = torch.tile(torch.arange(num_segs).unsqueeze(1), [1, seg_len]).to(self.device)
     flat_word_segments = torch.masked_select(torch.reshape(word_segments, [-1]), torch.reshape(input_mask, [-1]).bool())
     mention_segments = flat_word_segments[top_span_starts].unsqueeze(1) # [k, 1]
     antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]] #[k, c]
     segment_distance = torch.clamp(mention_segments - antecedent_segments, 0, self.config['max_training_sentences'] - 1) if self.config['use_segment_distance'] else None #[k, c]#segment_distance
     
-    dummy_scores = torch.zeros([k, 1])
+    dummy_scores = torch.zeros([int(k.item()), 1]).to(self.device)
     if self.config['fine_grained']: #fine_grained
       for i in range(self.config['coref_depth']):#coref_depth
         top_antecedent_emb = top_span_emb[top_antecedents] # [k, c, emb]
@@ -282,7 +283,7 @@ class BertForCoref(nn.Module):
 
     top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1) # [k, c + 1]
     top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents] # [k, c]
-    top_antecedent_cluster_ids += torch.log(top_antecedents_mask.long()).int() # [k, c]
+    top_antecedent_cluster_ids += torch.log(top_antecedents_mask.long()).long() # [k, c]
     same_cluster_indicator = torch.eq(top_antecedent_cluster_ids, top_span_cluster_ids.unsqueeze(1)) # [k, c]
     non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1) # [k, 1]
     pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator) # [k, c]
