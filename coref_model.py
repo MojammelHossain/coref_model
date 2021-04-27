@@ -117,7 +117,7 @@ class BertForCoref(nn.Module):
   
   def get_mention_scores(self, span_emb, span_starts, span_ends):
     span_scores = self.mention_span_scores(span_emb) # [k, 1]
-    if config['use_prior']:#use_prior
+    if self.config['use_prior']:#use_prior
       span_width_index = span_ends - span_starts # [NC]
       width_scores = self.mention_width_scores(self.span_width_prior_embedding) # [k, 1]
       width_scores = width_scores[span_width_index]
@@ -217,13 +217,13 @@ class BertForCoref(nn.Module):
 
   def forward(self, input_ids, input_mask, text_len, speaker_ids, genre, is_training, gold_starts, gold_ends, cluster_ids, sentence_map):
     out = self.bert(input_ids=input_ids, attention_mask=input_mask)
-    dropout = nn.Dropout(self.get_dropout(config['dropout_prob'], is_training), inplace=False)
+    dropout = nn.Dropout(self.get_dropout(self.config['dropout_prob'], is_training), inplace=False)
 
     num_sentences = out['last_hidden_state'].shape[0]
     max_sentence_length = out['last_hidden_state'].shape[1]
-    mention_doc = self.flatten_emb_by_sentence(out['last_hidden_state'], batch['input_mask'].bool())
+    mention_doc = self.flatten_emb_by_sentence(out['last_hidden_state'], input_mask.bool())
     num_words = mention_doc.shape[0]
-    flattened_sentence_indices = torch.tensor(batch['sentence_map'])
+    flattened_sentence_indices = torch.tensor(sentence_map)
 
     candidate_starts = torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30])
     candidate_ends = candidate_starts + torch.arange(30).unsqueeze(0)
