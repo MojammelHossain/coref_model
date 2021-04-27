@@ -2,6 +2,7 @@ import math
 import util
 import torch
 import torch.nn as nn
+import numpy as np
 from collections import OrderedDict
 from transformers import BertModel
 
@@ -223,7 +224,7 @@ class BertForCoref(nn.Module):
     max_sentence_length = out['last_hidden_state'].shape[1]
     mention_doc = self.flatten_emb_by_sentence(out['last_hidden_state'], input_mask.bool())
     num_words = mention_doc.shape[0]
-    flattened_sentence_indices = torch.tensor(sentence_map)
+    flattened_sentence_indices = sentence_map
 
     candidate_starts = torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30])
     candidate_ends = candidate_starts + torch.arange(30).unsqueeze(0)
