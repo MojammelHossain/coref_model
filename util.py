@@ -68,7 +68,7 @@ def collate_fn(example):
             "gold_starts": torch.tensor(example[7]).long(),
             "gold_ends": torch.tensor(example[8]).long(),
             "cluster_ids": torch.tensor(example[9], dtype=torch.int32),
-            "sentence_map": torch.tensor(example[10], dtype=torch.int32)
+            "sentence_map": torch.tensor(example[10])
             }
 
 def get_train_dataloader(config):
