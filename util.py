@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import errno
 import torch
 import pyhocon
 import coref_ops
@@ -73,13 +74,21 @@ def collate_fn(example):
             "sentence_map": torch.tensor(example[10])
             }
 
-def get_train_dataloader(config):
+def get_dataloader(config, evaluation=False):
     examples = []
-    with open(config["train_path"],"r") as file:
+    if evaluation == False:
+      path = config["train_path"]
+      is_training = True
+    else:
+      path = config["eval_path"]
+      is_training = False
+
+    with open(path,"r") as file:
       for line in file.readlines():
         examples.append(json.loads(line))
 
     tokenizer = BertTokenizer.from_pretrained(config["model_name"], do_lower_case=True)
-    dataset = dataloader.MyDataset(examples, config["max_segment_len"], config["max_training_sentences"], config["genres"], tokenizer, True)
-    train_dataloader = DataLoader(dataset, batch_size=1, drop_last=False, shuffle=False, collate_fn=collate_fn)
-    return train_dataloader
+    dataset = dataloader.MyDataset(examples, config["max_segment_len"], config["max_training_sentences"], config["genres"], tokenizer, is_training)
+    data_loader = DataLoader(dataset, batch_size=1, drop_last=False, shuffle=False, collate_fn=collate_fn)
+    return data_loader
+
