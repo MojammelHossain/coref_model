@@ -224,11 +224,11 @@ class BertForCoref(nn.Module):
     num_sentences = out['last_hidden_state'].shape[0]
     max_sentence_length = out['last_hidden_state'].shape[1]
     mention_doc = self.flatten_emb_by_sentence(out['last_hidden_state'], input_mask.bool())
-    num_words = torch.tensor(mention_doc.shape[0]).to('cuda')
+    num_words = torch.tensor(mention_doc.shape[0]).to(self.device)
     flattened_sentence_indices = sentence_map
 
     candidate_starts = torch.tile(torch.arange(num_words).unsqueeze(1), [1, 30]).to(self.device)
-    candidate_ends = (candidate_starts + torch.arange(30, device="cuda").unsqueeze(0)).to(self.device)
+    candidate_ends = (candidate_starts + torch.arange(30, device=self.device).unsqueeze(0))
     candidate_start_sentence_indices = flattened_sentence_indices[candidate_starts]
     candidate_end_sentence_indices = flattened_sentence_indices[torch.minimum(candidate_ends, num_words - 1)]
     candidate_mask = torch.logical_and(candidate_ends < num_words, torch.eq(candidate_start_sentence_indices, candidate_end_sentence_indices))
