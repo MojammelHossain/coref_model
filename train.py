@@ -55,10 +55,10 @@ if __name__ == "__main__":
     		steps_per_second = global_steps/total_time
 
     		avg_loss = total_loss/config['report_frequency']
-    		logger.info("[{}] loss={:.2f}, steps/s={:.2f}".format(global_step, avg_loss, steps_per_second))
+    		logger.info("[{}] loss={:.2f}, steps/s={:.2f}".format(global_steps, avg_loss, steps_per_second))
     		total_loss = 0.0
 
-    	if global_steps > 0 and global_steps % config['eval_frequency']:
+    	if global_steps > 0 and global_steps % config['eval_frequency'] == 0:
     		eval_f1 = evaluate.evaluate(model, config, device)
 
     		path = config["log_dir"]+"/model.{}.pt".format(global_steps)
@@ -81,5 +81,3 @@ if __name__ == "__main__":
     				'bert_optimizer': bert_optimizer.state_dict(),
     				'task_optimizer': task_optimizer.state_dict()
     				}, (config["log_dir"]+"/model.max.pt"))
-
-

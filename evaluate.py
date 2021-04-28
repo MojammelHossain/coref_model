@@ -63,7 +63,7 @@ def evaluate(model, config, device):
       (candidate_starts, candidate_ends, candidate_mention_scores, top_span_starts, top_span_ends, top_antecedents, top_antecedent_scores), loss = model.forward(batch['input_ids'].to(device), batch['input_mask'].to(device), batch['text_len'], batch['speaker_ids'].to(device), batch['genre'], False, batch['gold_starts'].to(device), batch['gold_ends'].to(device), batch['cluster_ids'].to(device), batch['sentence_map'].to(device))
       losses.append(loss)
       predicted_antecedents = get_predicted_antecedents(top_antecedents.cpu().detach().numpy(), top_antecedent_scores.cpu().detach().numpy())
-      coref_predictions[example["doc_key"]] = evaluate_coref(top_span_starts.cpu().detach().numpy(), top_span_ends.cpu().detach().numpy(), predicted_antecedents, batch["clusters"], coref_evaluator)
+      coref_predictions[batch["doc_key"]] = evaluate_coref(top_span_starts.cpu().detach().numpy(), top_span_ends.cpu().detach().numpy(), predicted_antecedents, batch["clusters"], coref_evaluator)
       if i % 10 == 0:
         print("Evaluated {}/{} examples.".format(i + 1, len(eval_dataloader)))
     
