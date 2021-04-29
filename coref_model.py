@@ -12,6 +12,8 @@ class BertForCoref(nn.Module):
     super(BertForCoref, self).__init__()
     self.config = config
     self.device = device
+    self.dropout = nn.Dropout(self.get_dropout(self.config['dropout_prob'], True), inplace=False)
+    self.softmax = nn.Softmax(dim=1)
     self.bert = BertModel.from_pretrained(config['model_name'])
     self.mention_word_attn = nn.Linear(768, 1, bias=True)
     self.in_features = 1536
@@ -89,11 +91,11 @@ class BertForCoref(nn.Module):
     doc_range = torch.tile(torch.arange(num_words).unsqueeze(0), [num_c, 1]).to(self.device) # [K, T]
     mention_mask = torch.logical_and(doc_range >= span_starts.unsqueeze(1), doc_range <= span_ends.unsqueeze(1)) #[K, T]
     word_attn = self.mention_word_attn(encoded_doc).squeeze(1)
-    mention_word_attn = nn.Softmax(dim=1)(torch.log(mention_mask.long()) + word_attn.unsqueeze(0))
+    mention_word_attn = self.softmax((torch.log(mention_mask.long()) + word_attn.unsqueeze(0)))
     return mention_word_attn
       
  
-  def get_span_emb(self, head_emb, context_outputs, span_starts, span_ends, dropout):
+  def get_span_emb(self, head_emb, context_outputs, span_starts, span_ends):
     span_emb_list = []
 
     span_start_emb = context_outputs[span_starts] # [k, emb]
@@ -107,7 +109,7 @@ class BertForCoref(nn.Module):
     if self.config['use_features']:
       span_width_index = span_width - 1 # [k]
       span_width_emb = self.span_width_embedding[span_width_index]
-      span_width_emb = dropout(span_width_emb)
+      span_width_emb = self.dropout(span_width_emb)
       span_emb_list.append(span_width_emb)
       
     if self.config['model_heads']:
@@ -126,9 +128,9 @@ class BertForCoref(nn.Module):
       span_scores += width_scores
     return span_scores
 
-  def get_fast_antecedent_scores(self, top_span_emb, dropout):
-    source_top_span_emb = dropout(self.src_projection(top_span_emb)) # [k, emb]
-    target_top_span_emb = dropout(top_span_emb) # [k, emb]
+  def get_fast_antecedent_scores(self, top_span_emb):
+    source_top_span_emb = self.dropout(self.src_projection(top_span_emb)) # [k, emb]
+    target_top_span_emb = self.dropout(top_span_emb) # [k, emb]
     return torch.matmul(source_top_span_emb, target_top_span_emb.T) # [k, k]
   
   def bucket_distance(self, distances):
@@ -155,17 +157,17 @@ class BertForCoref(nn.Module):
       gathered = gathered.squeeze() # [batch_size, num_indices]
     return gathered
 
-  def coarse_to_fine_pruning(self, top_span_emb, top_span_mention_scores, c, dropout):
+  def coarse_to_fine_pruning(self, top_span_emb, top_span_mention_scores, c):
     k = top_span_emb.shape[0]
     top_span_range = torch.arange(top_span_emb.shape[0]).to(self.device) # [k]
     antecedent_offsets = top_span_range.unsqueeze(1) - top_span_range.unsqueeze(0) # [k, k]
     antecedents_mask = antecedent_offsets >= 1 # [k, k]
     fast_antecedent_scores = top_span_mention_scores.unsqueeze(1) + top_span_mention_scores.unsqueeze(0) # [k, k]
     fast_antecedent_scores += torch.log(antecedents_mask) # [k, k]
-    fast_antecedent_scores += self.get_fast_antecedent_scores(top_span_emb, dropout) # [k, k]
+    fast_antecedent_scores += self.get_fast_antecedent_scores(top_span_emb) # [k, k]
     if self.config['use_prior']:
       antecedent_distance_buckets = self.bucket_distance(antecedent_offsets) # [k, c]
-      distance_scores = self.distance_scores_linear(dropout(self.antecedent_distance_embedding)) #[10, 1]
+      distance_scores = self.distance_scores_linear(self.dropout(self.antecedent_distance_embedding)) #[10, 1]
       antecedent_distance_scores = distance_scores.squeeze(1)[antecedent_distance_buckets] # [k, c]
       fast_antecedent_scores += antecedent_distance_scores
 
@@ -175,7 +177,7 @@ class BertForCoref(nn.Module):
     top_antecedent_offsets = self.batch_gather(antecedent_offsets, top_antecedents) # [k, c]
     return top_antecedents, top_antecedents_mask, top_fast_antecedent_scores, top_antecedent_offsets
   
-  def get_slow_antecedent_scores(self, top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets, top_span_speaker_ids, genre_emb, segment_distance=None, dropout=None):
+  def get_slow_antecedent_scores(self, top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets, top_span_speaker_ids, genre_emb, segment_distance=None):
     k = top_span_emb.shape[0]
     c = top_antecedents.shape[1]
     feature_emb_list = []
@@ -199,7 +201,7 @@ class BertForCoref(nn.Module):
       feature_emb_list.append(segment_distance_emb)
     
     feature_emb = torch.cat(feature_emb_list, 2) # [k, c, emb]
-    feature_emb = dropout(feature_emb) # [k, c, emb]
+    feature_emb = self.dropout(feature_emb) # [k, c, emb]
 
     target_emb = top_span_emb.unsqueeze(1) # [k, 1, emb]
     similarity_emb = top_antecedent_emb * target_emb # [k, c, emb]
@@ -219,7 +221,6 @@ class BertForCoref(nn.Module):
 
   def forward(self, input_ids, input_mask, text_len, speaker_ids, genre, is_training, gold_starts, gold_ends, cluster_ids, sentence_map):
     out = self.bert(input_ids=input_ids, attention_mask=input_mask)
-    dropout = nn.Dropout(self.get_dropout(self.config['dropout_prob'], is_training), inplace=False)
 
     num_sentences = out['last_hidden_state'].shape[0]
     max_sentence_length = out['last_hidden_state'].shape[1]
@@ -238,7 +239,7 @@ class BertForCoref(nn.Module):
     candidate_sentence_indices = torch.masked_select(candidate_start_sentence_indices.view(-1), flattened_candidate_mask) # [num_candidates]
     candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends, gold_starts, gold_ends, cluster_ids)
 
-    candidate_span_emb = self.get_span_emb(mention_doc, mention_doc, candidate_starts, candidate_ends, dropout)
+    candidate_span_emb = self.get_span_emb(mention_doc, mention_doc, candidate_starts, candidate_ends)
     candidate_mention_scores =  self.get_mention_scores(candidate_span_emb, candidate_starts, candidate_ends)
     
     candidate_mention_scores = candidate_mention_scores.squeeze(1) # [k]
@@ -260,7 +261,7 @@ class BertForCoref(nn.Module):
     else:
         top_span_speaker_ids = None
     
-    top_antecedents, top_antecedents_mask, top_fast_antecedent_scores, top_antecedent_offsets = self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, c, dropout)
+    top_antecedents, top_antecedents_mask, top_fast_antecedent_scores, top_antecedent_offsets = self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, c)
     num_segs, seg_len = input_ids.shape[0], input_ids.shape[1]
     word_segments = torch.tile(torch.arange(num_segs).unsqueeze(1), [1, seg_len]).to(self.device)
     flat_word_segments = torch.masked_select(torch.reshape(word_segments, [-1]), torch.reshape(input_mask, [-1]).bool())
@@ -272,8 +273,8 @@ class BertForCoref(nn.Module):
     if self.config['fine_grained']: #fine_grained
       for i in range(self.config['coref_depth']):#coref_depth
         top_antecedent_emb = top_span_emb[top_antecedents] # [k, c, emb]
-        top_antecedent_scores = top_fast_antecedent_scores + self.get_slow_antecedent_scores(top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets, top_span_speaker_ids.long(), genre_emb, segment_distance, dropout) # [k, c]
-        top_antecedent_weights = torch.nn.Softmax()(torch.cat([dummy_scores, top_antecedent_scores], 1)) # [k, c + 1]
+        top_antecedent_scores = top_fast_antecedent_scores + self.get_slow_antecedent_scores(top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets, top_span_speaker_ids.long(), genre_emb, segment_distance) # [k, c]
+        top_antecedent_weights = self.softmax((torch.cat([dummy_scores, top_antecedent_scores], 1))) # [k, c + 1]
         top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb], 1) # [k, c + 1, emb]
         attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb, 1) # [k, emb]
         f = torch.sigmoid(self.coref_layer_f(torch.cat([top_span_emb, attended_span_emb], 1))) # [k, emb]
