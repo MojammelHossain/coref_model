@@ -1,5 +1,5 @@
 # BERT for Coreference Resolution
-Instruction will be update soon..
+Instruction will be update soon after publication.
 
 # References
   
